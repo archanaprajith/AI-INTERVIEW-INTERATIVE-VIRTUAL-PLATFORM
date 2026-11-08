@@ -127,7 +127,14 @@ export default function ChatInterviewPage() {
 
         return () => {
             if (recognitionRef.current) {
-                recognitionRef.current.stop();
+                try {
+                    recognitionRef.current.abort();
+                } catch (e) {}
+            }
+            if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+                try {
+                    window.speechSynthesis.cancel();
+                } catch (e) {}
             }
             if (silenceTimeoutRef.current) {
                 clearTimeout(silenceTimeoutRef.current);

@@ -1,13 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { AIAvatar } from '@/components/interview/AIAvatar';
 import { 
   ArrowLeft, Mic, MicOff, VideoOff, Video, Loader2, 
-  PhoneMissed, Volume2, RefreshCw, Send, MessageSquare, Check, Sparkles 
+  PhoneMissed, Volume2, RefreshCw, Send, MessageSquare, Check, Sparkles, X, User
 } from 'lucide-react';
 
 interface Message {
@@ -42,6 +42,7 @@ export default function VirtualInterviewPage() {
     tip?: string;
   } | null>(null);
   
+  // Critical refs to eliminate restart loops and flickering
   const recognitionRef = useRef<any>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const isSpeakingRef = useRef(false);
@@ -49,87 +50,82 @@ export default function VirtualInterviewPage() {
   const isLoadingRef = useRef(false);
   const shouldListenRef = useRef(false);
   const isRecognitionActiveRef = useRef(false);
+  const isTerminatedRef = useRef(false);
   const silenceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const restartTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const accumulatedSpeechRef = useRef('');
   
-  // Sync refs
+  // Keep refs in sync
   const messagesRef = useRef(messages);
   useEffect(() => { messagesRef.current = messages; }, [messages]);
   useEffect(() => { isSpeakingRef.current = isSpeakingState; }, [isSpeakingState]);
   useEffect(() => { isListeningRef.current = isListeningState; }, [isListeningState]);
   useEffect(() => { isLoadingRef.current = isLoading; }, [isLoading]);
 
-  // 1. Initialize Webcam & Mic
-  const initMedia = async () => {
-    setErrorMsg(null);
-    try {
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
-      }
-      
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-      setIsCameraReady(true);
-      setIsAudioEnabled(true);
-      setIsVideoEnabled(true);
-    } catch (err: any) {
-      console.warn("Media access denied or error:", err);
-      setErrorMsg("Camera or Microphone access was denied. Please allow permissions in your browser settings (lock icon next to URL) and click Retry.");
-      
-      // Fallback: try video only
-      try {
-        const vidStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        streamRef.current = vidStream;
-        if (videoRef.current) videoRef.current.srcObject = vidStream;
-        setIsCameraReady(true);
-        setIsAudioEnabled(false);
-      } catch (videoErr) {
-        setIsCameraReady(false);
-      }
-    }
-  };
-
-  useEffect(() => {
-    initMedia();
-
-    return () => {
-      cleanupResources();
-    };
-  }, []);
-
-  const cleanupResources = () => {
+  // Master cleanup function - terminates all camera/mic tracks and loops immediately
+  const cleanupResources = useCallback(() => {
+    isTerminatedRef.current = true;
     shouldListenRef.current = false;
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => {
-        try { track.stop(); } catch (e) {}
-      });
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    if (recognitionRef.current) {
-      try { recognitionRef.current.stop(); } catch (e) {}
-    }
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+    
+    // Clear all pending timeouts to prevent restart loops
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+      restartTimeoutRef.current = null;
     }
     if (silenceTimeoutRef.current) {
       clearTimeout(silenceTimeoutRef.current);
+      silenceTimeoutRef.current = null;
     }
-  };
 
+    // Immediately abort speech recognition (releases hardware microphone session)
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.abort();
+      } catch (e) {}
+      recognitionRef.current = null;
+    }
+    isRecognitionActiveRef.current = false;
+    setIsListeningState(false);
+
+    // Stop and release ALL media stream tracks (turns OFF hardware webcam light)
+    if (streamRef.current) {
+      try {
+        streamRef.current.getTracks().forEach(track => {
+          track.enabled = false;
+          track.stop();
+        });
+      } catch (e) {}
+      streamRef.current = null;
+    }
+
+    // Detach and pause video element
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+        videoRef.current.srcObject = null;
+      } catch (e) {}
+    }
+
+    // Cancel speech synthesis
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+      } catch (e) {}
+    }
+    
+    setIsSpeakingState(false);
+    setIsCameraReady(false);
+  }, []);
+
+  // End Interview button handler
   const endInterview = () => {
     cleanupResources();
     router.push('/dashboard');
   };
 
-  // Safe Speech Recognition Starter
+  // Safe Speech Recognition Starter with anti-flapping guards
   const safeStartListening = () => {
+    if (isTerminatedRef.current) return;
     if (!shouldListenRef.current || isSpeakingRef.current || isLoadingRef.current) return;
     if (!recognitionRef.current) return;
     if (isRecognitionActiveRef.current) return;
@@ -140,22 +136,104 @@ export default function VirtualInterviewPage() {
       setIsListeningState(true);
     } catch (e: any) {
       if (e.name !== 'InvalidStateError') {
-        console.warn("Speech start warning:", e);
+        console.warn("Speech start issue:", e);
       }
     }
   };
 
   const safeStopListening = () => {
+    if (restartTimeoutRef.current) {
+      clearTimeout(restartTimeoutRef.current);
+      restartTimeoutRef.current = null;
+    }
     if (recognitionRef.current) {
       try {
-        recognitionRef.current.stop();
+        recognitionRef.current.abort();
       } catch (e) {}
     }
     isRecognitionActiveRef.current = false;
     setIsListeningState(false);
   };
 
-  // 2. Initialize Speech Recognition Engine once
+  // 1. Initialize Webcam & Mic cleanly
+  const initMedia = async () => {
+    setErrorMsg(null);
+    isTerminatedRef.current = false;
+
+    try {
+      // Clean up any existing stream first
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
+
+      // Request both audio and video
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { width: { ideal: 1280 }, height: { ideal: 720 } }, 
+        audio: true 
+      });
+
+      if (isTerminatedRef.current) {
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
+
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      setIsCameraReady(true);
+      setIsAudioEnabled(true);
+      setIsVideoEnabled(true);
+    } catch (primaryErr: any) {
+      console.warn("Full media access rejected, trying fallback:", primaryErr);
+
+      // Attempt video-only fallback if audio failed
+      try {
+        const vidStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        if (isTerminatedRef.current) {
+          vidStream.getTracks().forEach(t => t.stop());
+          return;
+        }
+
+        streamRef.current = vidStream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = vidStream;
+        }
+        setIsCameraReady(true);
+        setIsAudioEnabled(false);
+        setIsVideoEnabled(true);
+        setErrorMsg("Microphone access is unavailable. You can answer using the 'Type Response' button.");
+      } catch (videoErr) {
+        setIsCameraReady(false);
+        setIsAudioEnabled(false);
+        setErrorMsg("Camera and Microphone access was restricted. Please allow permissions in your browser address bar.");
+      }
+    }
+  };
+
+  // Lifecycle: Initialize media on mount & attach window unload listener
+  useEffect(() => {
+    isTerminatedRef.current = false;
+    initMedia();
+
+    const handleWindowUnload = () => {
+      cleanupResources();
+    };
+
+    window.addEventListener('beforeunload', handleWindowUnload);
+    window.addEventListener('pagehide', handleWindowUnload);
+    window.addEventListener('popstate', handleWindowUnload);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleWindowUnload);
+      window.removeEventListener('pagehide', handleWindowUnload);
+      window.removeEventListener('popstate', handleWindowUnload);
+      cleanupResources();
+    };
+  }, [cleanupResources]);
+
+  // 2. Initialize Speech Recognition Engine ONCE with strict anti-looping logic
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
@@ -191,49 +269,71 @@ export default function VirtualInterviewPage() {
       if (combinedText.length > 0) {
         if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
         
-        // Auto-submit after 2 seconds of silence
+        // Auto-submit after 2.2s of silence
         silenceTimeoutRef.current = setTimeout(() => {
-          if (!isSpeakingRef.current && !isLoadingRef.current) {
+          if (!isSpeakingRef.current && !isLoadingRef.current && !isTerminatedRef.current) {
             const textToSubmit = (accumulatedSpeechRef.current + ' ' + interim).trim();
             if (textToSubmit) {
               handleUserCompletedSpeech(textToSubmit);
             }
           }
-        }, 2000);
+        }, 2200);
       }
     };
 
     rec.onerror = (event: any) => {
-      console.warn("Speech recognition event error:", event.error);
-      if (event.error === 'not-allowed') {
-        setErrorMsg("Microphone access was denied. Please allow microphone permissions in browser settings.");
-        setIsListeningState(false);
+      // Critical: Do NOT loop or flicker on error
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        shouldListenRef.current = false;
         isRecognitionActiveRef.current = false;
-      } else if (event.error !== 'no-speech') {
         setIsListeningState(false);
-        isRecognitionActiveRef.current = false;
+        setIsAudioEnabled(false);
+        if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+        setErrorMsg("Microphone permission was denied. You can still type your answers using 'Type Response'.");
+        return;
       }
+      
+      // 'no-speech' is normal when user is thinking; do NOT treat as fatal
+      if (event.error === 'no-speech') {
+        return;
+      }
+
+      if (event.error === 'aborted') {
+        return;
+      }
+
+      setIsListeningState(false);
+      isRecognitionActiveRef.current = false;
     };
 
     rec.onend = () => {
       isRecognitionActiveRef.current = false;
       setIsListeningState(false);
-      // Auto-restart safely if candidate should be speaking
-      if (shouldListenRef.current && !isSpeakingRef.current && !isLoadingRef.current) {
-        setTimeout(() => {
-          safeStartListening();
-        }, 300);
+
+      // Never auto-restart if terminated or if not meant to listen
+      if (isTerminatedRef.current || !shouldListenRef.current || isSpeakingRef.current || isLoadingRef.current) {
+        return;
       }
+
+      // Calm, non-flapping restart with 1200ms debounce
+      if (restartTimeoutRef.current) clearTimeout(restartTimeoutRef.current);
+      restartTimeoutRef.current = setTimeout(() => {
+        if (shouldListenRef.current && !isTerminatedRef.current && !isSpeakingRef.current && !isLoadingRef.current) {
+          safeStartListening();
+        }
+      }, 1200);
     };
 
     recognitionRef.current = rec;
 
     return () => {
-      try { rec.stop(); } catch (e) {}
+      try {
+        rec.abort();
+      } catch (e) {}
     };
   }, []);
 
-  // Preload voices
+  // Preload speech synthesis voices
   useEffect(() => {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       window.speechSynthesis.getVoices();
@@ -273,12 +373,14 @@ export default function VirtualInterviewPage() {
   const speakText = (text: string) => {
     if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
       setIsLoading(false);
-      shouldListenRef.current = true;
-      safeStartListening();
+      if (isAudioEnabled && !isTerminatedRef.current) {
+        shouldListenRef.current = true;
+        safeStartListening();
+      }
       return;
     }
     
-    // Stop microphone while AI is speaking
+    // Stop microphone cleanly while AI speaks
     shouldListenRef.current = false;
     safeStopListening();
     if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
@@ -287,6 +389,8 @@ export default function VirtualInterviewPage() {
       window.speechSynthesis.cancel();
 
       setTimeout(() => {
+        if (isTerminatedRef.current) return;
+
         const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = 'en-US';
         utterance.rate = 1.0;
@@ -299,36 +403,43 @@ export default function VirtualInterviewPage() {
 
         utterance.onend = () => {
           setIsSpeakingState(false);
-          // Reset speech buffers and resume listening for user
           accumulatedSpeechRef.current = '';
           setLiveTranscript('');
-          shouldListenRef.current = true;
-          setTimeout(() => {
-            safeStartListening();
-          }, 200);
+          
+          if (!isTerminatedRef.current && isAudioEnabled) {
+            shouldListenRef.current = true;
+            setTimeout(() => {
+              safeStartListening();
+            }, 300);
+          }
         };
 
         utterance.onerror = (e) => {
-          console.warn("Speech synthesis error event:", e);
+          console.warn("Speech synthesis event:", e);
           setIsSpeakingState(false);
           accumulatedSpeechRef.current = '';
           setLiveTranscript('');
-          shouldListenRef.current = true;
-          safeStartListening();
+          if (!isTerminatedRef.current && isAudioEnabled) {
+            shouldListenRef.current = true;
+            safeStartListening();
+          }
         };
 
         window.speechSynthesis.speak(utterance);
       }, 50);
     } catch (err) {
-      console.warn("Speech failure:", err);
+      console.warn("Speech synthesis error:", err);
       setIsSpeakingState(false);
-      shouldListenRef.current = true;
-      safeStartListening();
+      if (!isTerminatedRef.current && isAudioEnabled) {
+        shouldListenRef.current = true;
+        safeStartListening();
+      }
     }
   };
 
+  // Snapshot capture with camera-off safety check
   const captureSnapshot = (): string | null => {
-    if (!videoRef.current || !canvasRef.current) return null;
+    if (!isVideoEnabled || !videoRef.current || !canvasRef.current) return null;
     const canvas = canvasRef.current;
     const video = videoRef.current;
     
@@ -338,11 +449,10 @@ export default function VirtualInterviewPage() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return null;
     
-    ctx.translate(canvas.width, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
     try {
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       return canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
     } catch (e) {
       return null;
@@ -351,7 +461,7 @@ export default function VirtualInterviewPage() {
 
   const handleUserCompletedSpeech = async (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed || isLoadingRef.current) return;
+    if (!trimmed || isLoadingRef.current || isTerminatedRef.current) return;
 
     if (silenceTimeoutRef.current) clearTimeout(silenceTimeoutRef.current);
     shouldListenRef.current = false;
@@ -388,10 +498,12 @@ export default function VirtualInterviewPage() {
     } catch (err: any) {
       console.error("Fetch error:", err);
       setIsLoading(false);
-      shouldListenRef.current = true;
-      safeStartListening();
+      if (!isTerminatedRef.current && isAudioEnabled) {
+        shouldListenRef.current = true;
+        safeStartListening();
+      }
       if (err.name === 'AbortError') {
-        setErrorMsg("Response timed out. Let's keep moving—please speak your next thought.");
+        setErrorMsg("Response timed out. Let's keep moving—please share your next thought.");
       }
     }
   };
@@ -425,11 +537,12 @@ export default function VirtualInterviewPage() {
 
   const toggleVideo = () => {
     if (streamRef.current) {
-      const videoTrack = streamRef.current.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = !isVideoEnabled;
-        setIsVideoEnabled(!isVideoEnabled);
-      }
+      const videoTracks = streamRef.current.getVideoTracks();
+      const newVideoState = !isVideoEnabled;
+      videoTracks.forEach(t => {
+        t.enabled = newVideoState;
+      });
+      setIsVideoEnabled(newVideoState);
     }
   };
 
@@ -458,21 +571,30 @@ export default function VirtualInterviewPage() {
         </div>
       </div>
 
-      {/* Permission Warning Banner with Active Retry */}
+      {/* Static, Non-flickering Warning Banner with Dismiss Button */}
       {errorMsg && (
         <div className="max-w-7xl w-full mx-auto px-4 mb-4 z-10 animate-in fade-in">
-          <div className="bg-red-500/10 border border-red-500/50 text-red-200 px-4 py-3 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+          <div className="bg-amber-500/10 border border-amber-500/40 text-amber-200 px-4 py-3 rounded-xl flex items-center justify-between gap-3 shadow-lg">
             <div className="flex items-center gap-3">
-              <VideoOff className="w-5 h-5 text-red-400 shrink-0" />
+              <VideoOff className="w-5 h-5 text-amber-400 shrink-0" />
               <p className="text-xs md:text-sm font-medium">{errorMsg}</p>
             </div>
-            <Button 
-              size="sm" 
-              onClick={initMedia} 
-              className="bg-red-600 hover:bg-red-700 text-white font-semibold text-xs shrink-0 self-end sm:self-auto"
-            >
-              <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Retry Permissions
-            </Button>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button 
+                size="sm" 
+                onClick={initMedia} 
+                className="bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs px-3 h-8"
+              >
+                <RefreshCw className="w-3 h-3 mr-1" /> Retry
+              </Button>
+              <button
+                onClick={() => setErrorMsg(null)}
+                className="text-amber-300 hover:text-white p-1 rounded-md"
+                title="Dismiss message"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -482,15 +604,28 @@ export default function VirtualInterviewPage() {
         
         {/* User Webcam (Left Pane) */}
         <div className="flex-1 rounded-2xl overflow-hidden bg-black border border-slate-700 shadow-2xl relative min-h-[320px] md:min-h-[460px] flex items-center justify-center">
+           
+           {/* Active Video Feed */}
            <video 
               ref={videoRef} 
               autoPlay 
               playsInline 
               muted 
-              className="w-full h-full object-cover transform -scale-x-100" 
+              className={`w-full h-full object-cover transform -scale-x-100 ${!isVideoEnabled ? 'hidden' : 'block'}`}
            />
+
+           {/* Video Off Placeholder */}
+           {!isVideoEnabled && (
+             <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 text-slate-400 p-6 text-center">
+                <div className="w-24 h-24 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center mb-3">
+                  <User className="w-12 h-12 text-slate-500" />
+                </div>
+                <p className="font-semibold text-white text-sm mb-1">Camera Turned Off</p>
+                <p className="text-xs text-slate-400">Click the camera icon below to re-enable your video feed.</p>
+             </div>
+           )}
            
-           {!isCameraReady && (
+           {!isCameraReady && isVideoEnabled && (
              <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-800/90 text-slate-400 p-6 text-center">
                 <VideoOff className="w-10 h-10 mb-3 opacity-50 text-indigo-400" />
                 <p className="font-medium text-white mb-1">Camera Permission Required</p>
