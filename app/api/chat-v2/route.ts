@@ -87,9 +87,10 @@ export async function POST(req: NextRequest) {
 
         // --- Resilience Logic: Retry with Multiple Models ---
         const modelsByPriority = [
-            { name: 'gemini-1.5-flash', json: true },
-            { name: 'gemini-2.0-flash', json: true },
-            { name: 'gemini-1.5-pro', json: true }
+            { name: 'gemini-2.5-flash', json: true },
+            { name: 'gemini-flash-latest', json: true },
+            { name: 'gemini-2.5-pro', json: true },
+            { name: 'gemini-2.5-flash-lite', json: true }
         ];
         
         let lastError = null;

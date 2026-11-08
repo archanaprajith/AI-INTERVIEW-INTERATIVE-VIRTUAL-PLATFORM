@@ -63,10 +63,10 @@ export async function POST(req: NextRequest) {
             contents.push({ role: 'user', parts: [{ text: systemInstruction + "\n\n[SYSTEM READY V2.5.1] Hello! I am your AI Interview Coach. Can you hear me?" }] });
         }
 
-        console.log(`[${new Date().toLocaleTimeString()}] Chat API: Using Gemini 1.5-flash...`);
+        console.log(`[${new Date().toLocaleTimeString()}] Chat API: Using Gemini 2.5-flash...`);
         
         const response = await ai.models.generateContent({
-            model: 'gemini-1.5-flash',
+            model: 'gemini-2.5-flash',
             contents: contents,
             config: {
                 responseMimeType: "application/json",

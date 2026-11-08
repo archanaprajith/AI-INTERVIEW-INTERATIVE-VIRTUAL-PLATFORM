@@ -53,9 +53,10 @@ export async function generateQuestion(
     const fullCategoryName = categoryMap[category] || category;
 
     const modelsToTry = [
-        'gemini-1.5-flash',
-        'gemini-2.0-flash',
-        'gemini-1.5-pro'
+        'gemini-2.5-flash',
+        'gemini-flash-latest',
+        'gemini-2.5-pro',
+        'gemini-2.5-flash-lite'
     ];
     let lastError: any = null;
 
@@ -101,9 +102,10 @@ export async function evaluateAnswer(
     idealAnswer: string;
 }> {
     const modelsToTry = [
-        'gemini-1.5-flash',
-        'gemini-2.0-flash',
-        'gemini-1.5-pro'
+        'gemini-2.5-flash',
+        'gemini-flash-latest',
+        'gemini-2.5-pro',
+        'gemini-2.5-flash-lite'
     ];
     let lastError: any = null;
 
@@ -197,9 +199,10 @@ export async function evaluateResume(
     imageInfo?: { data: string, mimeType: string }
 ): Promise<CVAtsEvaluation> {
     const modelsByPriority = [
-        { name: 'gemini-1.5-flash', json: true },
-        { name: 'gemini-2.0-flash', json: true },
-        { name: 'gemini-1.5-pro', json: true }
+        { name: 'gemini-2.5-flash', json: true },
+        { name: 'gemini-flash-latest', json: true },
+        { name: 'gemini-2.5-pro', json: true },
+        { name: 'gemini-2.5-flash-lite', json: true }
     ];
     let lastError: any = null;
 
