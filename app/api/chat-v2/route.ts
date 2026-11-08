@@ -85,12 +85,12 @@ export async function POST(req: NextRequest) {
             contents[0].parts[0].text = systemInstruction + "\n\n" + contents[0].parts[0].text;
         }
 
-        // --- Resilience Logic: Retry with Multiple Models ---
+        // --- Resilience Logic: Retry with Multiple High-Availability Models ---
         const modelsByPriority = [
             { name: 'gemini-2.5-flash', json: true },
-            { name: 'gemini-flash-latest', json: true },
-            { name: 'gemini-2.5-pro', json: true },
-            { name: 'gemini-2.5-flash-lite', json: true }
+            { name: 'gemini-3.5-flash', json: true },
+            { name: 'gemini-flash-lite-latest', json: true },
+            { name: 'gemini-flash-latest', json: true }
         ];
         
         let lastError = null;
@@ -153,18 +153,24 @@ export async function POST(req: NextRequest) {
             }
         }
 
-        // --- Final Critical Fallback ---
-        // Instead of showing an error, we provide a generic but plausible interview question
-        const fallbacks = [
-            "I'm having a brief sync issue, but let's keep the momentum! Could you describe a time you had to troubleshoot a difficult bug in a production environment?",
-            "Technical connectivity is slightly lagging, but I'm still here. Tell me about a technical project you're most proud of and why.",
-            "Let's continue while I refresh my connection. How do you approach learning a new technology or framework quickly?",
-            "I'm experiencing a minor overload, but let's stay focused. What are the key considerations you take when designing a scalable system?"
+        // --- Conversational Flow Fallback ---
+        const technicalFallbacks = [
+            "Great, let's keep moving forward! Could you walk me through the architecture of a high-traffic system you built or worked with?",
+            "Understood. How do you approach optimizing database queries and handling caching under heavy load?",
+            "Let's dive into system resilience: how would you design a microservice to gracefully handle third-party API outages?",
+            "Could you describe a time you had to troubleshoot a difficult bug in a production environment?"
         ];
-        const randomFallback = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+        const generalFallbacks = [
+            "Thank you for sharing that. Could you tell me about a significant challenge you faced in a previous project and how you overcame it?",
+            "That's insightful. Where do you see yourself contributing most effectively within a cross-functional engineering team?",
+            "Tell me about a time you had a difference of opinion with a colleague or manager, and how you resolved it constructively?",
+            "What motivates you most in your daily engineering work, and how do you prioritize competing deadlines?"
+        ];
+        const pool = mode === 'general' ? generalFallbacks : technicalFallbacks;
+        const selectedReply = pool[Math.floor(Math.random() * pool.length)];
 
         return NextResponse.json({ 
-            reply: randomFallback,
+            reply: selectedReply,
             analysis: { 
                 bodyLanguage: "Professional", 
                 anxiety: "Stable", 

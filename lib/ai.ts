@@ -54,9 +54,9 @@ export async function generateQuestion(
 
     const modelsToTry = [
         'gemini-2.5-flash',
-        'gemini-flash-latest',
-        'gemini-2.5-pro',
-        'gemini-2.5-flash-lite'
+        'gemini-3.5-flash',
+        'gemini-flash-lite-latest',
+        'gemini-flash-latest'
     ];
     let lastError: any = null;
 
@@ -103,22 +103,23 @@ export async function evaluateAnswer(
 }> {
     const modelsToTry = [
         'gemini-2.5-flash',
-        'gemini-flash-latest',
-        'gemini-2.5-pro',
-        'gemini-2.5-flash-lite'
+        'gemini-3.5-flash',
+        'gemini-flash-lite-latest',
+        'gemini-flash-latest'
     ];
     let lastError: any = null;
 
-    const prompt = `You are an Expert Career Mentor evaluating a candidate's response. Your goal is to guide them toward mastery.
+    const prompt = `You are an Expert Technical Interviewer and Engineering Lead evaluating a candidate's response.
             
             Question: "${questionText}"
             Candidate Answer: "${answerText}"
             Category: "${category}"
             
-            CRITERIA:
-            1. Helpfulness: Is your feedback constructive?
-            2. Technical Depth: Is the technical advice accurate for a senior level?
-            3. Tone: Be a "Supportive Architect"—rigorous but encouraging.
+            SCORING RULES (CRITICAL):
+            1. Rigorously assess the technical accuracy, clarity, and completeness.
+            2. If the user's answer is factually wrong, nonsensical, irrelevant, gibberish, or a trivial non-answer (e.g. "idk", "hi", "test", random letters, or incorrect technical assertions), you MUST assign low scores (contentQuality: 0-15, completeness: 0-15, total: 0-20). Do NOT give generous scores to incorrect answers.
+            3. If the answer is partially correct with missing edge cases, score between 40 and 65.
+            4. If the answer is comprehensive, accurate, and structured with real-world understanding, score 80 to 100.
             
             Return ONLY a raw JSON object string with the following EXACT schema:
             {
@@ -144,7 +145,7 @@ export async function evaluateAnswer(
             const data = JSON.parse(cleanText);
             
             // Ensure schema validity
-            if (!data.scores) data.scores = { contentQuality: 50, clarity: 50, confidence: 50, completeness: 50, total: 50 };
+            if (!data.scores) data.scores = { contentQuality: 20, clarity: 30, confidence: 30, completeness: 20, total: 25 };
             if (!data.feedback) data.feedback = { strengths: [], improvements: [], summary: "Evaluation complete." };
             if (!data.idealAnswer) data.idealAnswer = "The ideal answer involves deep technical details relevant to the question.";
             
@@ -156,15 +157,72 @@ export async function evaluateAnswer(
         }
     }
 
-    // Final Fallback
+    // Smart Local Fallback based on answer substance
+    return calculateLocalAnswerEvaluation(answerText, questionText, category);
+}
+
+function calculateLocalAnswerEvaluation(answerText: string, questionText: string, category: string) {
+    const trimmed = (answerText || '').trim();
+    const lower = trimmed.toLowerCase();
+    
+    // Check if the answer is empty, extremely brief, or a non-answer
+    if (trimmed.length < 15 || /^(idk|dont know|i do not know|hi|hello|test|nothing|no|yes|na|none|\.+)$/i.test(trimmed)) {
+        return {
+            scores: {
+                contentQuality: 5,
+                clarity: 15,
+                confidence: 10,
+                completeness: 5,
+                total: 8
+            },
+            feedback: {
+                strengths: ["You initiated a response."],
+                improvements: [
+                    "The response is too brief or incomplete to demonstrate technical understanding.",
+                    "Explain the core mechanisms, definitions, and practical implementation details."
+                ],
+                summary: "Your answer did not contain sufficient technical substance. Aim to provide thorough, multi-sentence explanations with concrete examples."
+            },
+            idealAnswer: `An effective response in ${category} begins with a direct answer to the core question, illustrates the underlying principles, discusses real-world trade-offs, and provides a concise example.`
+        };
+    }
+
+    // Keyword detection for technical substance
+    const techWords = [
+        'data', 'structure', 'algorithm', 'system', 'database', 'query', 'index', 'network',
+        'protocol', 'latency', 'cache', 'thread', 'process', 'memory', 'concurrency', 'lock',
+        'api', 'request', 'response', 'server', 'client', 'component', 'state', 'props',
+        'performance', 'scale', 'architecture', 'function', 'object', 'class', 'complexity'
+    ];
+    const matched = techWords.filter(w => lower.includes(w)).length;
+    
+    const wordCount = trimmed.split(/\s+/).length;
+    const completenessScore = Math.min(Math.round(wordCount * 1.5 + matched * 4), 65);
+    const contentScore = Math.min(Math.round(matched * 8 + (wordCount > 20 ? 15 : 5)), 70);
+    const clarityScore = Math.min(Math.round(25 + Math.min(wordCount, 30)), 70);
+    const confidenceScore = Math.min(Math.round(20 + matched * 5), 65);
+    const totalScore = Math.round((contentScore * 0.4) + (clarityScore * 0.25) + (completenessScore * 0.25) + (confidenceScore * 0.1));
+
     return {
-        scores: { contentQuality: 50, clarity: 50, confidence: 50, completeness: 50, total: 50 },
-        feedback: {
-            strengths: ["Thank you for submitting an answer."],
-            improvements: ["AI evaluation is temporarily under heavy load."],
-            summary: "I've recorded your answer. Let's keep moving to keep the momentum!"
+        scores: {
+            contentQuality: contentScore,
+            clarity: clarityScore,
+            confidence: confidenceScore,
+            completeness: completenessScore,
+            total: totalScore
         },
-        idealAnswer: `An ideal response for a question in ${category} would typically involve a clear thesis, technical depth, and practical examples.`
+        feedback: {
+            strengths: [
+                wordCount > 15 ? "Clear communication style." : "Addressed the question prompt.",
+                matched > 2 ? "Included relevant technical terms." : "Articulated a viewpoint."
+            ],
+            improvements: [
+                "Deepen the technical analysis by discussing edge cases and practical trade-offs.",
+                "Structure your answer with clear architectural steps or STAR methodology."
+            ],
+            summary: `Evaluated score: ${totalScore}/100. Incorporate more concrete system details and trade-offs to increase your score.`
+        },
+        idealAnswer: `For questions in ${category}, senior candidates typically analyze edge cases, scale constraints, time/space complexity, and practical implementation trade-offs.`
     };
 }
 
@@ -200,9 +258,9 @@ export async function evaluateResume(
 ): Promise<CVAtsEvaluation> {
     const modelsByPriority = [
         { name: 'gemini-2.5-flash', json: true },
-        { name: 'gemini-flash-latest', json: true },
-        { name: 'gemini-2.5-pro', json: true },
-        { name: 'gemini-2.5-flash-lite', json: true }
+        { name: 'gemini-3.5-flash', json: true },
+        { name: 'gemini-flash-lite-latest', json: true },
+        { name: 'gemini-flash-latest', json: true }
     ];
     let lastError: any = null;
 

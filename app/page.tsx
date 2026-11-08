@@ -68,7 +68,7 @@ export default function HomePage() {
         <div className="relative max-w-5xl mx-auto px-6 text-center z-10">
           <div className="animate-scale-in" style={{ animationDelay: '0.1s' }}>
             <Badge className="mb-8 py-2 px-5 text-sm bg-white/80 backdrop-blur-md text-indigo-700 border border-indigo-100 shadow-xl shadow-indigo-100/20 rounded-full animate-float">
-              <Sparkles className="w-4 h-4 mr-2 inline text-purple-500" /> Powered by Gemini 1.5 Pro Elite
+              <Sparkles className="w-4 h-4 mr-2 inline text-purple-500" /> Powered by Gemini 2.5 Flash
             </Badge>
           </div>
           
