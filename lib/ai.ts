@@ -1,17 +1,16 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import type { OverallScore } from './types';
-import fs from 'fs';
-import path from 'path';
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
-// Explicitly target v1 if v1beta 404s
-// (Note: Some environments might need v1beta, but we'll try the default first and then consider forcing v1 if issues persist)
+function getGenAI() {
+    const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
+    return new GoogleGenerativeAI(apiKey);
+}
 
-// Replaced mock generation with real Gemini 2.0 Flash API calls
 // Resilience Upgrade: Added retry logic for better consistency
 const delay = (ms: number) => new Promise(res => setTimeout(res, ms));
 
 async function generateWithRetry(modelName: string, prompt: string, temperature: number = 0.7, retries: number = 2): Promise<string> {
+    const genAI = getGenAI();
     const model = genAI.getGenerativeModel({ 
         model: modelName,
         generationConfig: { temperature }
@@ -54,11 +53,9 @@ export async function generateQuestion(
     const fullCategoryName = categoryMap[category] || category;
 
     const modelsToTry = [
-        'gemini-2.5-flash',
-        'gemini-flash-latest',
         'gemini-1.5-flash',
-        'gemini-pro',
-        'gemini-2.0-flash'
+        'gemini-2.0-flash',
+        'gemini-1.5-pro'
     ];
     let lastError: any = null;
 
@@ -104,11 +101,9 @@ export async function evaluateAnswer(
     idealAnswer: string;
 }> {
     const modelsToTry = [
-        'gemini-2.5-flash',
-        'gemini-flash-latest',
         'gemini-1.5-flash',
-        'gemini-pro',
-        'gemini-2.0-flash'
+        'gemini-2.0-flash',
+        'gemini-1.5-pro'
     ];
     let lastError: any = null;
 
@@ -202,19 +197,14 @@ export async function evaluateResume(
     imageInfo?: { data: string, mimeType: string }
 ): Promise<CVAtsEvaluation> {
     const modelsByPriority = [
-        { name: 'gemini-2.0-flash', json: true },
-        { name: 'gemini-2.5-flash', json: true },
-        { name: 'gemini-flash-latest', json: true },
-        { name: 'gemini-1.5-flash-8b', json: true },
         { name: 'gemini-1.5-flash', json: true },
-        { name: 'gemini-pro', json: false }
+        { name: 'gemini-2.0-flash', json: true },
+        { name: 'gemini-1.5-pro', json: true }
     ];
     let lastError: any = null;
-    const logPath = path.join(process.cwd(), 'ai-debug.log');
 
     const log = (msg: string) => {
-        const time = new Date().toLocaleTimeString();
-        fs.appendFileSync(logPath, `[${time}] [RESUME-AI] ${msg}\n`);
+        console.log(`[RESUME-AI] ${msg}`);
     };
 
     for (const modelConfig of modelsByPriority) {
@@ -227,6 +217,7 @@ export async function evaluateResume(
                 genConfig.responseMimeType = "application/json";
             }
 
+            const genAI = getGenAI();
             const model = genAI.getGenerativeModel({ 
                 model: modelName,
                 generationConfig: genConfig

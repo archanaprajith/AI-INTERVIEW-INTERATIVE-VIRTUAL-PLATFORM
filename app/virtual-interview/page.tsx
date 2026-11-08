@@ -74,10 +74,55 @@ export default function VirtualInterviewPage() {
 
     return () => {
       if (streamRef.current) {
-        streamRef.current.getTracks().forEach(track => track.stop());
+        streamRef.current.getTracks().forEach(track => {
+          try {
+            track.stop();
+          } catch (e) {}
+        });
+        streamRef.current = null;
+      }
+      if (videoRef.current) {
+        videoRef.current.srcObject = null;
+      }
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch (e) {}
+      }
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+      }
+      if (silenceTimeoutRef.current) {
+        clearTimeout(silenceTimeoutRef.current);
       }
     };
   }, []);
+
+  const endInterview = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch (e) {}
+      });
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (e) {}
+    }
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    if (silenceTimeoutRef.current) {
+      clearTimeout(silenceTimeoutRef.current);
+    }
+    router.push('/dashboard');
+  };
 
   // 2. Initialize Speech Recognition Engine
   useEffect(() => {
@@ -331,7 +376,7 @@ export default function VirtualInterviewPage() {
     <div className="min-h-screen bg-slate-900 flex flex-col pt-4">
       {/* Header View */}
       <div className="max-w-7xl w-full mx-auto px-4 flex items-center justify-between mb-6 z-10">
-        <Button variant="ghost" onClick={() => router.push('/')} className="text-slate-300 hover:text-white hover:bg-slate-800">
+        <Button variant="ghost" onClick={endInterview} className="text-slate-300 hover:text-white hover:bg-slate-800">
           <ArrowLeft className="w-4 h-4 mr-2" /> End Interview
         </Button>
         <h1 className="text-xl font-bold text-white flex items-center gap-2">
@@ -479,7 +524,7 @@ export default function VirtualInterviewPage() {
             <Button 
                size="icon" 
                variant="ghost"
-               onClick={() => router.push('/')}
+               onClick={endInterview}
                title="Leave call"
                className="w-16 h-12 rounded-3xl bg-red-600 hover:bg-red-700 text-white flex items-center justify-center border-none ml-2"
             >

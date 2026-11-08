@@ -1,25 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import fs from 'fs';
-import path from 'path';
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || '');
 
 export async function POST(req: NextRequest) {
-    const logPath = path.join(process.cwd(), 'ai-debug.log');
     const log = (msg: string) => {
-        const time = new Date().toLocaleTimeString();
-        fs.appendFileSync(logPath, `[${time}] ${msg}\n`);
+        console.log(`[CHAT-V2] ${msg}`);
     };
 
     try {
         const { messages, image, mode = 'technical' } = await req.json();
-        const apiKey = process.env.GEMINI_API_KEY;
+        const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY || '';
 
         if (!apiKey) {
             log("ERROR: API Key missing");
-            return NextResponse.json({ reply: "API Key missing in .env.local" }, { status: 200 });
+            return NextResponse.json({ reply: "API Key missing in environment variables. Please set GEMINI_API_KEY." }, { status: 200 });
         }
+
+        const genAI = new GoogleGenerativeAI(apiKey);
 
         const systemInstruction = mode === 'general' 
             ? `You are an Expert Career Mentor & HR Specialist. 
@@ -91,12 +87,9 @@ export async function POST(req: NextRequest) {
 
         // --- Resilience Logic: Retry with Multiple Models ---
         const modelsByPriority = [
-            { name: 'gemini-2.0-flash', json: true },
-            { name: 'gemini-2.5-flash', json: true },
-            { name: 'gemini-flash-latest', json: true },
-            { name: 'gemini-1.5-flash-8b', json: true },
             { name: 'gemini-1.5-flash', json: true },
-            { name: 'gemini-pro', json: false }
+            { name: 'gemini-2.0-flash', json: true },
+            { name: 'gemini-1.5-pro', json: true }
         ];
         
         let lastError = null;

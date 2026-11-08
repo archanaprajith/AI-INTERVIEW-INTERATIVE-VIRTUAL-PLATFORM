@@ -4,12 +4,12 @@ import { GoogleGenAI } from '@google/genai';
 export async function POST(req: NextRequest) {
     try {
         const { messages, image } = await req.json();
-        const apiKey = process.env.GEMINI_API_KEY;
+        const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY;
 
         if (!apiKey) {
             console.error('Chat Route Failure: GEMINI_API_KEY is missing from environment variables');
             return NextResponse.json({ 
-                reply: "I'm sorry, I'm missing my AI API key configuration. Please check your .env.local file." 
+                reply: "I'm sorry, I'm missing my AI API key configuration. Please set GEMINI_API_KEY or NEXT_PUBLIC_GEMINI_API_KEY." 
             }, { status: 200 });
         }
 
@@ -63,11 +63,10 @@ export async function POST(req: NextRequest) {
             contents.push({ role: 'user', parts: [{ text: systemInstruction + "\n\n[SYSTEM READY V2.5.1] Hello! I am your AI Interview Coach. Can you hear me?" }] });
         }
 
-        const API_VERSION = "2.5.1-SDK";
-        console.log(`[${new Date().toLocaleTimeString()}] Chat API ${API_VERSION}: Using SDK for Gemini 2.5-flash...`);
+        console.log(`[${new Date().toLocaleTimeString()}] Chat API: Using Gemini 1.5-flash...`);
         
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-1.5-flash',
             contents: contents,
             config: {
                 responseMimeType: "application/json",
