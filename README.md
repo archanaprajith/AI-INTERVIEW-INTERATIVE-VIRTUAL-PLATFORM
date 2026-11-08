@@ -1,4 +1,4 @@
-# 🚀 AI Interactive Interview Platform
+# 🚀 AI Interactive Interview coach
 
 <p align="center">
   <strong>An AI-driven, voice-enabled mock interview platform that simulates real-world technical and HR panel interviews with real-time feedback, ATS resume analysis, and performance tracking.</strong>
